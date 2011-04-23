@@ -1,0 +1,9 @@
+i like http://espn.sportsbox.com/en/formula1-fantasy a lot.  as the site of
+choice for the cardorks' fantasy f1 exploits it's much nicer than
+http://www.f1grandprixmanager.com which we've used for years.  the latter has fallen
+into disrepair and is quite frankly a ghetto now.  but, as nice as sportsbox is,
+it does have its shortcomings as far as the data that's exposed.
+
+so i thought i'd make a screen scraper, populate a sqlite3 db, and see what
+secret insights i can divine from ye olde data....
+

@@ -7,3 +7,9 @@ it does have its shortcomings as far as the data that's exposed.
 so i thought i'd make a screen scraper, populate a sqlite3 db, and see what
 secret insights i can divine from ye olde data....
 
+setup
+1) install perl
+2) install sqlite
+3) perl loader.pl
+4) query away on db table 'f1_2011'
+

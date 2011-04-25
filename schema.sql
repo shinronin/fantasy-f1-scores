@@ -6,7 +6,9 @@ CREATE TABLE f1_2011 (
     name_abbr TEXT,
     team TEXT NOT NULL,
     position TEXT NOT NULL,
+	-- replace with curr_value
     value INTEGER NOT NULL,
+	-- add prev_value
     growth INTEGER NOT NULL,
     total_growth INTEGER NOT NULL,
     points INTEGER,

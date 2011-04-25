@@ -9,7 +9,9 @@ secret insights i can divine from ye olde data....
 
 setup
 1) install perl
-2) install sqlite
-3) perl loader.pl
-4) query away on db table 'f1_2011'
+2) install DBI
+3) install HTML::TableExtract
+4) install sqlite
+5) perl loader.pl
+6) query away on db table 'f1_2011'
 

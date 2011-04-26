@@ -50,54 +50,63 @@ sub parse_rows {
 	my( $rd, $pos, $rows ) = @_;
 
 	my $f = '[parse_rows]';
-	# TODO value => curr_value & prev_value
-	my @flds = qw/round name team position value growth total_growth points victories podiums poles laps_completed laps_attempted overtakes popularity trend value_idx name_short name_abbr/;
 	my @recs = ();
+	my @flds = qw/round name team position value growth total_growth points
+	victories podiums poles laps overtakes popularity trend value_idx
+	/;
+	my @opts = qw/laps_completed laps_attempted name_short name_abbr curr_value
+	prev_value/;
 
 	foreach my $row ( @$rows ) {
 		my %rec = ();
-		# scoped here to ensure size of %rec identical for all $pos
-		my( $laps_c, $laps_a, $ot ) = ( 0 ) x 3;
+		@rec{@flds} = @$row;
+		print "$f rec flds from row:\n", Dumper( %rec ), "\n" if $debug;
+		@rec{@opts} = ( '' ) x @opts;
+		print "$f rec opts:\n", Dumper( %rec ), "\n" if $debug;
 
 		if ( $pos eq 'engine' || $pos eq 'driver' ) {
-			print "$f raw [1]: '$row->[1]'\n" if $debug;
+			# print "$f raw row->[1]: '$row->[1]'\n" if $debug;
+			# print "$f raw rec name: '$rec{name}'\n" if $debug;
+			my( $name, $uri );
+
 			# \s+ for LIU driver record 'Liuzzi </a>'
-			my $name = $1 if $row->[1] =~ />\b(.*)\b\s+</;
-			print "$f name: '$1'\n" if $debug; # TODO wtf?
+			if ( $rec{name} =~ />\b(.*)\b\s+</ ) {
+				$name = $1;
+				print "$f name: $name\n" if $debug;
+			}
+			else {
+				die "$f couldn't parse name";
+			}
 
-			my $uri = $1 if $row->[1] =~ /href="(.*)"/;
-			print "$f uri: '$1'\n" if $debug;
+			if ( $rec{name} =~ /href="(.*)"/ ) {
+				$uri = $1;
+				print "$f uri: $uri\n" if $debug;
+			}
+			else {
+				die "$f couldn't parse uri";
+			}
 
-			# assign name to replace uri string
-			$row->[1] = $name;
+			# replace html string
+			$rec{name} = $name;
 
 			if ( $pos eq 'engine' ) {
-				( $laps_c, $laps_a, $ot ) = get_pos_data( $rd, $pos, $uri );
-
-				# replace overtakes before splice
-				$row->[12] = $ot;
+				my @flds = qw/laps_completed laps_attempted overtakes/;
+				@rec{@flds} = get_pos_data( $rd, $pos, $uri );
 			}
 
 			if ( $pos eq 'driver' ) {
-				$laps_c = ( split /\//, $row->[11] )[0];
-				print "$f (split) driver laps_c: $laps_c\n" if $debug;
-
-				$laps_a = get_pos_data( $rd, $pos, $uri );
-				print "$f (get_pos_data) driver laps_a: $laps_a\n" if $debug;
-
-				print "$f ot: $row->[12]\n";
+				$rec{laps_completed} = ( split /\//, $rec{laps} )[0];
+				$rec{laps_attempted} = get_pos_data( $rd, $pos, $uri );
 			}
 
-			# replace laps with laps completed & laps attempted
-			splice @$row, 11, 1, $laps_c, $laps_a;
+			$rec{curr_value} = delete $rec{value};
+			$rec{prev_value} = $rec{curr_value} - $rec{growth};
+			delete $rec{laps};
 		}
 
-		push @$row, get_name_data( $pos, $row->[1] );
+		@rec{qw/name_short name_abbr/} = get_name_data( $pos, $rec{name} );
+		print "$f finished rec:\n", Dumper( %rec ), "\n" if $debug;
 
-		print "$f row: ", join( ', ', @$row ), "\n" # TODO wtf?
-			if $debug;
-
-		@rec{@flds} = @$row;
 		push @recs, \%rec;
 	}
 

@@ -2,6 +2,8 @@
 use strict;
 
 use Data::Dumper;
+# quote strings only
+$Data::Dumper::Useqq = 1;
 use DBI;
 use Encode;
 use HTML::TableExtract;
@@ -14,33 +16,29 @@ my $sort = 'value';
 my $debug = 1;
 
 # AUS, MYS, CHN, TUR
-foreach my $rd ( 1 .. 1 ) {
+foreach my $rd ( 3 .. 3 ) {
 	print "[main] loading...\n";
 	print "[main] rd: $rd\n" if $debug;
-	# foreach my $pos ( qw/pitcrew chassis engine driver/ ) {
-	foreach my $pos ( qw/driver/ ) {
+	foreach my $pos ( qw/pitcrew chassis engine driver/ ) {
 		print "[main] pos: $pos\n";
 		my $url = join '',
 			$host, $uri, $rd, '?',
 			"sort=$sort&direction=descending&team=&position=$pos&page=0";
 
-		unless ( my $html = get_html( $url ) ) {
-			die "couldn't get html from $url";
-		}
-		else {
-			my $recs = [];
-			my $rows = get_table_rows( {
-				keep_html => $pos eq 'engine' || $pos eq 'driver' ? 1 : 0,
-				depth => 0, count => 1,
-			}, {
-				rd => $rd, pos => $pos, html => $html
-			} );
+		my $html = get_html( $url );
+		die "couldn't get html from $url" unless $html;
+		my $recs = [];
+		my $rows = get_table_rows( {
+			keep_html => $pos eq 'engine' || $pos eq 'driver' ? 1 : 0,
+			depth => 0, count => 1,
+		}, {
+			rd => $rd, pos => $pos, html => $html
+		} );
 
-			push @$recs, parse_rows( $rd, $pos, $rows );
-			print '[main] recs: ', Dumper( $recs ),"\n" if $debug;
+		push @$recs, parse_rows( $rd, $pos, $rows );
+		# print '[main] recs: ', Dumper( $recs ),"\n" if $debug;
 
-			insert_data( $recs );
-		}
+		insert_data( $recs );
 	}
 
 	print "[main] finished.\n";
@@ -60,34 +58,19 @@ sub parse_rows {
 	foreach my $row ( @$rows ) {
 		my %rec = ();
 		@rec{@flds} = @$row;
-		print "$f rec flds from row:\n", Dumper( %rec ), "\n" if $debug;
-		@rec{@opts} = ( '' ) x @opts;
-		print "$f rec opts:\n", Dumper( %rec ), "\n" if $debug;
+        @rec{@opts} = ( '' ) x @opts;
 
 		if ( $pos eq 'engine' || $pos eq 'driver' ) {
-			# print "$f raw row->[1]: '$row->[1]'\n" if $debug;
-			# print "$f raw rec name: '$rec{name}'\n" if $debug;
-			my( $name, $uri );
+			# \s* for LIU driver record 'Liuzzi </a>'
+			$rec{name} =~ />\b(.*)\b\s*</;
+			my $name = $1;
 
-			# \s+ for LIU driver record 'Liuzzi </a>'
-			if ( $rec{name} =~ />\b(.*)\b\s+</ ) {
-				$name = $1;
-				print "$f name: $name\n" if $debug;
-			}
-			else {
-				die "$f couldn't parse name";
-			}
-
-			if ( $rec{name} =~ /href="(.*)"/ ) {
-				$uri = $1;
-				print "$f uri: $uri\n" if $debug;
-			}
-			else {
-				die "$f couldn't parse uri";
-			}
+			$rec{name} =~ /href="(.*)"/;
+            my $uri = $1;
 
 			# replace html string
 			$rec{name} = $name;
+            print "$f name: $name\n" if $debug;
 
 			if ( $pos eq 'engine' ) {
 				my @flds = qw/laps_completed laps_attempted overtakes/;
@@ -99,13 +82,20 @@ sub parse_rows {
 				$rec{laps_attempted} = get_pos_data( $rd, $pos, $uri );
 			}
 
-			$rec{curr_value} = delete $rec{value};
+            # print "$f value: $rec{value}\n" if $debug;
+
+			$rec{curr_value} = $rec{value};
+            # print "$f curr_value: $rec{curr_value}\n" if $debug;
+
 			$rec{prev_value} = $rec{curr_value} - $rec{growth};
-			delete $rec{laps};
+            # print "$f prev_value: $rec{prev_value}\n" if $debug;
 		}
 
+        my @del = delete @rec{qw/value laps/};
+        die "value and laps fields not deleted" unless @del == 2;
+
 		@rec{qw/name_short name_abbr/} = get_name_data( $pos, $rec{name} );
-		print "$f finished rec:\n", Dumper( %rec ), "\n" if $debug;
+		# print "$f finished rec:\n", Dumper( %rec ), "\n" if $debug;
 
 		push @recs, \%rec;
 	}
@@ -113,42 +103,50 @@ sub parse_rows {
 	return @recs;
 }
 
-# id integer primary key,
-# round integer,
-# name text,
-# name_short text,
-# name_abbr text,
-# team text,
-# position text,
-# value integer,
-# growth integer,
-# total_growth integer,
-# points integer,
-# victories integer,
-# podiums integer,
-# poles integer,
-# laps_completed integer
-# laps_attempted integer,
-# overtakes integer,
-# popularity integer,
-# trend integer,
-# value_idx integer
-
+# -- required
+# id INTEGER PRIMARY KEY AUTOINCREMENT,
+# round INTEGER NOT NULL,
+# name TEXT NOT NULL,
+# team TEXT NOT NULL,
+# position TEXT NOT NULL,
+# -- deleted during parsing, replaced with curr_value, prev_value
+# -- value INTEGER NOT NULL,
+# growth INTEGER NOT NULL,
+# total_growth INTEGER NOT NULL,
+# points INTEGER,
+# victories INTEGER,
+# podiums INTEGER,
+# poles INTEGER,
+# -- deleted during parsing, replaced with laps_completed, laps_attempted
+# -- laps TEXT NOT NULL,
+# overtakes INTEGER,
+# popularity INTEGER NOT NULL,
+# trend INTEGER NOT NULL,
+# value_idx INTEGER NOT NULL,
+# -- optional
+# laps_completed INTEGER,
+# laps_attempted INTEGER,
+# name_short TEXT,
+# name_abbr TEXT,
+# curr_value INTEGER NOT NULL,
+# prev_value INTEGER NOT NULL
 sub insert_data {
 	my( $recs ) = @_;
 
+    my $f = '[insert_data]';
 	my $dbh = DBI->connect(
 		'dbi:SQLite:dbname=fantasy_f1.db',
 		'', '',
 		{ AutoCommit => 0, RaiseError => 1 },
 	);
-	die "couldn't connect to db!" unless $dbh;
+	die "couldn't connect to db" unless $dbh;
 
 	foreach my $rec ( @$recs ) {
 		# $rec->{id} = '';
 
 		my @flds = sort keys %$rec;
 		# print '[insert_data] # flds: ', scalar @flds, "\n" if $debug;
+        # print "$f flds: ", join( ', ', @flds ), "\n" if $debug;
 
 		# my @binds = map { $_ eq '' ? 'NULL' : "'$_'" } @$rec{@flds};
 		my @binds = @$rec{@flds};
@@ -174,6 +172,8 @@ sub get_html {
 	my( $url ) = @_;
 
 	my $ua = LWP::UserAgent->new;
+    # set timeout to 60 secs. instead of 180
+    $ua->timeout(60);
 	my $res = $ua->request( GET $url );
 
 	return $res->is_success ? decode_utf8( $res->content ) : undef;
@@ -182,6 +182,7 @@ sub get_html {
 sub get_table_rows {
 	my( $te_args, $args ) = @_;
 
+    my $f = '[get_table_rows]';
 	my $te = HTML::TableExtract->new( %$te_args );
 	$te->parse( $args->{html} );
 
@@ -192,11 +193,16 @@ sub get_table_rows {
 	shift @rows;
 
 	foreach my $row ( @rows ) {
-		$row = trim( $row );
-		$row = $args->{pos} eq 'subreq' ? $row : clean_row( $row );
+        # print "$f row: ", Dumper( $row ), "\n" if $debug;
 
 		# overwrite row # col with round for all but subreq
 		$row->[0] = $args->{rd} unless $args->{pos} eq 'subreq';
+
+		$row = trim( $row );
+        # print "$f trim row: ", Dumper( $row ), "\n" if $debug;
+
+		$row = $args->{pos} eq 'subreq' ? $row : clean_row( $row );
+        # print "$f clean row: ", Dumper( $row ), "\n" if $debug;
 	}
 
 	return \@rows;
@@ -208,88 +214,84 @@ sub get_pos_data {
 	my $f = '[get_pos_data]';
 	my $url = $host . $uri;
 
-	unless ( my $html = get_html( $url ) ) {
-		die "couldn't get html from $url";
-	}
-	else {
-		my $rows = get_table_rows( {
-			depth => 0, count => 1
-		}, {
-			rd => $rd, pos => 'subreq', html => $html
-		} );
-		my( $laps_c, $laps_a, $ot ) = ( 0 ) x 3;
-		# laps attempted per engine
-		my $e_laps_a = 0;
+	my $html = get_html( $url );
+	die "couldn't get html from $url";
+	my $rows = get_table_rows( {
+		depth => 0, count => 1
+	}, {
+		rd => $rd, pos => 'subreq', html => $html
+	} );
+	my( $laps_c, $laps_a, $ot ) = ( 0 ) x 3;
+	# laps attempted per engine
+	my $e_laps_a = 0;
 	
-		RD: for ( my $i = 0; $i < @$rows; $i++ ) {
-			my $row = $rows->[$i];
+	RD: for ( my $i = 0; $i < @$rows; $i++ ) {
+		my $row = $rows->[$i];
 
-			# skip all but rd row
-			next unless $row->[0];
-			next unless $row->[0] == $rd;
-			print "$f rd: $row->[0]\n" if $debug;
+		# skip all but rd row
+		next unless $row->[0];
+		next unless $row->[0] == $rd;
+		# print "$f rd: $row->[0]\n" if $debug;
 
-			# get race laps attempted
-			$laps_a = ( split /\//, trim( $row->[4] ) )[1];
-			# job done for driver
-			return $laps_a if $pos eq 'driver';
+		# get race laps attempted
+		$laps_a = ( split /\//, trim( $row->[4] ) )[1];
+        die "$f couldn't parse laps attempted" unless $laps_a;
+		# job done for driver
+		return $laps_a if $pos eq 'driver';
 
-			# double for 2 drivers
-			$e_laps_a = $laps_a * 2 if $pos eq 'engine';
+		# double for 2 drivers
+		$e_laps_a = $laps_a * 2 if $pos eq 'engine';
 
-			# capture laps x 2 & overtakes x 2
-			for my $idx ( 1 .. 4 ) {
-				my $next_row = $rows->[$i + $idx];
-				my( $next_rd, $next_data ) = @$next_row[0, 1];
+		# capture laps x 2 & overtakes x 2
+		for my $idx ( 1 .. 4 ) {
+			my $next_row = $rows->[$i + $idx];
+			my( $next_rd, $next_data ) = @$next_row[0, 1];
 
-				# continue to next rd if lookahead hits it
-				next RD if $next_rd && $next_rd == $rd + 1;
+			# continue to next rd if lookahead hits it
+			next RD if $next_rd && $next_rd == $rd + 1;
+            # next unless $next_data;
+            die "next_data not found" unless $next_data;
 
-				if ( lc $next_data =~ /(lap|overtake)s/i ) {
-					my $type = $1;
-					# print "$f type: '", lc $type, "'\n" if $debug;
+			lc( $next_data ) =~ /(lap|overtake)s/i;
+			my $type = $1;
+			# print "$f type: '", lc $type, "'\n" if $debug;
 
-					if ( $next_data =~ /(\d+)/ ) {
-						my $val = $1;
-						# print "$f val: $val\n" if $debug;
+            $next_data =~ /(\d+)/;
+			my $val = $1;
+			# print "$f val: $val\n" if $debug;
 
-						$laps_c += $val if lc $type eq 'lap';
-						print "$f laps_c: $laps_c\n"
-							if $laps_c && $debug;
+			$laps_c += $val if lc $type eq 'lap';
+			# print "$f laps_c: $laps_c\n" if $laps_c && $debug;
 
-						$ot	 += $val if lc $type eq 'overtake';
-						print "$f ot: $ot\n"
-							if $ot && $debug;
-					}
-				}
-			}
+			$ot += $val if lc $type eq 'overtake';
+			# print "$f ot: $ot\n" if $ot && $debug;
 		}
-	
-		if ( $debug ) {
-			print "$f laps_c: $laps_c\n";
-			print "$f laps_a: $laps_a\n";
-			print "$f     ot: $ot\n";
-		}
-
-		return ( $laps_c, $e_laps_a, $ot );
 	}
+	
+	# if ( $debug ) {
+		# print "$f laps_c: $laps_c\n";
+		# print "$f laps_a: $laps_a\n";
+		# print "$f     ot: $ot\n";
+	# }
+
+	return ( $laps_c, $e_laps_a, $ot );
 }
 
 sub get_name_data {
 	my( $pos, $name ) = @_;
 
 	my( $name_short, $name_abbr ) = ( '' ) x 2;
-	my @n = split /\s/, $name; # TODO wtf?
+	my @n = split /\s/, $name;
 
 	if ( $pos eq 'driver' ) {
 		# L. Hamilton
-		$name_short = join '', # TODO wtf?
+		$name_short = join '',
 			substr( $n[0], 0, 1 ),
 			". $n[1]",
 			( $n[2] ? $n[2] : '' );
 
 		# HAM
-		$name_abbr = uc substr $n[1], 0, 3; # TODO wtf?
+		$name_abbr = uc substr $n[1], 0, 3;
 		$name_abbr = 'MSC' if lc $n[1] eq 'schumacher';
 		$name_abbr = 'DIR' if lc $n[1] eq 'di';
 		$name_abbr = 'DAM' if lc $n[1] eq "d'ambrosio";
@@ -335,6 +337,8 @@ sub clean_row {
 	return [ map {
 		# kill british pound
 		s/\xa3//g;
+        # replace commas
+        s/,//g;
 		# kill percent
 		s/\s\%//g;
 		# kill ' p.' from driver points

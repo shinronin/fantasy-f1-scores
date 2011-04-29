@@ -25,6 +25,7 @@ CREATE TABLE f1_2011 (
     name_short TEXT,
     name_abbr TEXT,
     curr_value INTEGER NOT NULL,
-    prev_value INTEGER NOT NULL
+    prev_value INTEGER NOT NULL,
+	active INTEGER
 );
 

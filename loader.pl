@@ -2,7 +2,6 @@
 use strict;
 
 use Data::Dumper;
-# quote strings only
 $Data::Dumper::Useqq = 1;
 use DBI;
 use Encode;
@@ -14,9 +13,13 @@ my $host = 'http://espn.sportsbox.com';
 my $uri = '/en/formula1-fantasy/statistics/';
 my $sort = 'value';
 my $debug = 1;
+# TODO implement update
+my( $rd_start, $rd_end ) = @ARGV[0, 1];
+die "$0 <start rd> <end rd>" unless $rd_start;
+die "$0 <start rd> <end rd>" unless $rd_end;
 
 # AUS, MYS, CHN, TUR
-foreach my $rd ( 3 .. 3 ) {
+foreach my $rd ( $rd_start .. $rd_end ) {
 	print "[main] loading...\n";
 	print "[main] rd: $rd\n" if $debug;
 	foreach my $pos ( qw/pitcrew chassis engine driver/ ) {
@@ -78,18 +81,15 @@ sub parse_rows {
 			}
 
 			if ( $pos eq 'driver' ) {
-				$rec{laps_completed} = ( split /\//, $rec{laps} )[0];
-				$rec{laps_attempted} = get_pos_data( $rd, $pos, $uri );
+				@rec{qw/laps_completed laps_attempted/} = get_pos_data( $rd, $pos, $uri );
 			}
-
-            # print "$f value: $rec{value}\n" if $debug;
-
-			$rec{curr_value} = $rec{value};
-            # print "$f curr_value: $rec{curr_value}\n" if $debug;
-
-			$rec{prev_value} = $rec{curr_value} - $rec{growth};
-            # print "$f prev_value: $rec{prev_value}\n" if $debug;
 		}
+
+		$rec{curr_value} = $rec{value};
+        # print "$f curr_value: $rec{curr_value}\n" if $debug;
+
+		$rec{prev_value} = $rec{curr_value} - $rec{growth};
+        # print "$f prev_value: $rec{prev_value}\n" if $debug;
 
         my @del = delete @rec{qw/value laps/};
         die "value and laps fields not deleted" unless @del == 2;
@@ -174,9 +174,15 @@ sub get_html {
 	my $ua = LWP::UserAgent->new;
     # set timeout to 60 secs. instead of 180
     $ua->timeout(60);
-	my $res = $ua->request( GET $url );
+	my $res = undef;
+	my $fetched = 0;
 
-	return $res->is_success ? decode_utf8( $res->content ) : undef;
+	until ( $fetched ) {
+		$res = $ua->request( GET $url );
+		$fetched = 1 if $res->is_success;
+	}
+
+	return decode_utf8( $res->content );
 }
 
 sub get_table_rows {
@@ -215,7 +221,7 @@ sub get_pos_data {
 	my $url = $host . $uri;
 
 	my $html = get_html( $url );
-	die "couldn't get html from $url";
+	die "couldn't get html from $url" unless $html;
 	my $rows = get_table_rows( {
 		depth => 0, count => 1
 	}, {
@@ -233,11 +239,14 @@ sub get_pos_data {
 		next unless $row->[0] == $rd;
 		# print "$f rd: $row->[0]\n" if $debug;
 
-		# get race laps attempted
+		# engine & driver
+		# laps_completed parsed differently for engine & driver
 		$laps_a = ( split /\//, trim( $row->[4] ) )[1];
-        die "$f couldn't parse laps attempted" unless $laps_a;
-		# job done for driver
-		return $laps_a if $pos eq 'driver';
+
+		if ( $pos eq 'driver' ) {
+			$laps_c = ( split /\//, trim( $row->[4] ) )[0];
+			last && return ( $laps_c, $laps_a );
+		}
 
 		# double for 2 drivers
 		$e_laps_a = $laps_a * 2 if $pos eq 'engine';
@@ -249,8 +258,8 @@ sub get_pos_data {
 
 			# continue to next rd if lookahead hits it
 			next RD if $next_rd && $next_rd == $rd + 1;
-            # next unless $next_data;
-            die "next_data not found" unless $next_data;
+			# TODO correct?
+            next unless $next_data;
 
 			lc( $next_data ) =~ /(lap|overtake)s/i;
 			my $type = $1;
@@ -268,11 +277,11 @@ sub get_pos_data {
 		}
 	}
 	
-	# if ( $debug ) {
-		# print "$f laps_c: $laps_c\n";
-		# print "$f laps_a: $laps_a\n";
-		# print "$f     ot: $ot\n";
-	# }
+	if ( $debug ) {
+		print "$f engine laps_c: $laps_c\n";
+		print "$f engine laps_a: $laps_a\n";
+		print "$f engine ot: $ot\n";
+	}
 
 	return ( $laps_c, $e_laps_a, $ot );
 }

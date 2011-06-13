@@ -7,6 +7,8 @@ it does have its shortcomings as far as the data that's exposed.
 so i thought i'd make a screen scraper, populate a sqlite3 db, and see what
 secret insights i can divine from ye olde data....
 
+seeing as how http://espn.sportsbox.com/en/formula1-fantasy/statistics isn't working properly as of early may, i'm going to have to revisit how i approach parsing as GETs on atistics/1, atistics/2, etc. don't return the right data.  it's probably more efficient to get race data from a position type's record and build up race data myself anyway.
+
 setup
 1) install perl
 2) install DBI
